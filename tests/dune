@@ -32,3 +32,10 @@
  (modules test_entropy)
  (package mirage-crypto-entropy)
  (libraries mirage-crypto-entropy mirage-unix))
+
+(executable
+ (name test_pk_timing)
+ (public_name test-pk-timing)
+ (modules test_pk_timing)
+ (package mirage-crypto-pk)
+ (libraries mirage-crypto-pk mirage-crypto-rng.unix cmdliner logs fmt.tty logs.cli logs.fmt fmt.cli mtime.clock.os))

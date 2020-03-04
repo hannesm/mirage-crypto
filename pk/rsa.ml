@@ -79,23 +79,30 @@ and priv_bits ({ n; _ } : priv) = Z.numbits n
 
 let encrypt_unsafe ~key: ({ e; n } : pub) msg = Z.(powm msg e n)
 
-let decrypt_unsafe ~rsa_crt_hardening ~key:({ e; d; n; p; q; dp; dq; q'} : priv) c =
-  let m1 = Z.(powm c dp p)
-  and m2 = Z.(powm c dq q) in
+let decrypt_unsafe ~powm_sec ~rsa_crt_hardening ~key:({ e; d; n; p; q; dp; dq; q'} : priv) c =
+  let m1, m2 =
+    if powm_sec
+    then Z.(powm_sec c dp p), Z.(powm_sec c dq q)
+    else Z.(powm c dp p), Z.(powm c dq q)
+  in
+  (* erem (division) and multiplicatons are _not_ using the gmp sec variants *)
   let h  = Z.(erem (q' * (m1 - m2)) p) in
   let m  = Z.(h * q + m2) in
   (* counter Arjen Lenstra's CRT attack by verifying the signature. Since the
      public exponent is small, this is not very expensive. Mentioned again
      "Factoring RSA keys with TLS Perfect Forward Secrecy" (Weimer, 2015). *)
+  (* need for powm_sec here? *)
   if not rsa_crt_hardening || Z.(powm m e n) = c then
     m
   else
     Z.(powm c d n)
 
-let decrypt_blinded_unsafe ~rsa_crt_hardening ?g ~key:({ e; n; _} as key : priv) c =
+let decrypt_blinded_unsafe ~powm_sec ~rsa_crt_hardening ?g ~key:({ e; n; _} as key : priv) c =
   let r  = until (rprime n) (fun _ -> Z_extra.gen_r ?g two n) in
+  (* invert not using the _sec variant (should not matter) *)
   let r' = Z.(invert r n) in
-  let x  = decrypt_unsafe ~rsa_crt_hardening ~key Z.(powm r e n * c mod n) in
+  let x  = decrypt_unsafe ~powm_sec ~rsa_crt_hardening ~key Z.(powm r e n * c mod n) in
+  (* multiplication not using the _sec variant (does it matter?) *)
   Z.(r' * x mod n)
 
 let (encrypt_z, decrypt_z) =
@@ -103,20 +110,20 @@ let (encrypt_z, decrypt_z) =
     if msg < two then invalid_arg "Rsa: message: %a" Z.pp_print msg;
     if n <= msg then raise Insufficient_key in
   (fun ~(key : pub) msg -> check_params key.n msg ; encrypt_unsafe ~key msg),
-  (fun ~rsa_crt_hardening ~mask ~(key : priv) msg ->
+  (fun ~powm_sec ~rsa_crt_hardening ~mask ~(key : priv) msg ->
     check_params key.n msg ;
     match mask with
-    | `No         -> decrypt_unsafe ~rsa_crt_hardening ~key msg
-    | `Yes        -> decrypt_blinded_unsafe ~rsa_crt_hardening ~key msg
-    | `Yes_with g -> decrypt_blinded_unsafe ~rsa_crt_hardening ~g ~key msg )
+    | `No         -> decrypt_unsafe ~powm_sec ~rsa_crt_hardening ~key msg
+    | `Yes        -> decrypt_blinded_unsafe ~powm_sec ~rsa_crt_hardening ~key msg
+    | `Yes_with g -> decrypt_blinded_unsafe ~powm_sec ~rsa_crt_hardening ~g ~key msg )
 
 let reformat out f msg =
   Z_extra.(of_cstruct_be msg |> f |> to_cstruct_be ~size:(out // 8))
 
 let encrypt ~key              = reformat (pub_bits key)  (encrypt_z ~key)
 
-let decrypt ?(rsa_crt_hardening=false) ?(mask=`Yes) ~key =
-  reformat (priv_bits key) (decrypt_z ~rsa_crt_hardening ~mask ~key)
+let decrypt ?(powm_sec=false) ?(rsa_crt_hardening=false) ?(mask=`Yes) ~key =
+  reformat (priv_bits key) (decrypt_z ~powm_sec ~rsa_crt_hardening ~mask ~key)
 
 let well_formed ~e ~p ~q =
   three <= e && p <> q &&

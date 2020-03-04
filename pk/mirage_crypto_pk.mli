@@ -131,7 +131,7 @@ module Rsa : sig
 
       @raise Invalid_argument if [message] is [0x00] or [0x01]. *)
 
-  val decrypt : ?rsa_crt_hardening:bool -> ?mask:mask -> key:priv ->
+  val decrypt : ?powm_sec:bool -> ?rsa_crt_hardening:bool -> ?mask:mask -> key:priv ->
     Cstruct.t -> Cstruct.t
   (** [decrypt ~rsa_crt_hardening ~mask key ciphertext] is the decrypted
       [ciphertext], left-padded with [0x00] up to [key] size.
