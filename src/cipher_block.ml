@@ -216,7 +216,7 @@ module Modes = struct
       let buf    = Native.buffer (blocks * block_size) in
       Ctr.unsafe_count_into ctr ~blocks buf 0 ;
       Core.encrypt ~key ~blocks buf 0 buf 0 ;
-      of_bigarray ~len:n buf
+      of_bytes ~len:n buf
 
     let encrypt ~key ~ctr src =
       let res = stream ~key ~ctr src.len in

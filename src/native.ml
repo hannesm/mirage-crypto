@@ -1,10 +1,7 @@
 
-open Stdlib.Bigarray
+let buffer = Bytes.create
 
-let buffer = Array1.create char c_layout
-
-
-type buffer = (char, int8_unsigned_elt, c_layout) Array1.t
+type buffer = Bytes.t
 
 type off    = int
 type size   = int

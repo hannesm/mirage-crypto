@@ -60,11 +60,11 @@ extern struct _mc_cpu_features mc_detected_cpu_features;
 #endif
 #define __unit() value __unused(_)
 
-#define _ba_uint8_off(ba, off)  ((uint8_t*) Caml_ba_data_val (ba) + Long_val (off))
-#define _ba_uint32_off(ba, off) ((uint32_t*) Caml_ba_data_val (ba) + Long_val (off))
+#define _ba_uint8_off(ba, off)  ((uint8_t*) Bytes_val (ba) + Long_val (off))
+#define _ba_uint32_off(ba, off) ((uint32_t*) Bytes_val (ba) + Long_val (off))
 
-#define _ba_uint8(ba)  ((uint8_t*) Caml_ba_data_val (ba))
-#define _ba_uint32(ba) ((uint32_t*) Caml_ba_data_val (ba))
+#define _ba_uint8(ba)  ((uint8_t*) Bytes_val (ba))
+#define _ba_uint32(ba) ((uint32_t*) Bytes_val (ba))
 
 #define _bp_uint8_off(bp, off) ((uint8_t *) Bp_val (bp) + Long_val (off))
 #define _bp_uint8(bp) ((uint8_t *) Bp_val (bp))
