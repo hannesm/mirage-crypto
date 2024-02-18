@@ -180,18 +180,9 @@ static void fe_0(fe *h) {
   memset(h, 0, sizeof(fe));
 }
 
-static void fe_loose_0(fe_loose *h) {
-  memset(h, 0, sizeof(fe_loose));
-}
-
 // h = 1
 static void fe_1(fe *h) {
   memset(h, 0, sizeof(fe));
-  h->v[0] = 1;
-}
-
-static void fe_loose_1(fe_loose *h) {
-  memset(h, 0, sizeof(fe_loose));
   h->v[0] = 1;
 }
 
@@ -229,10 +220,6 @@ static void fe_mul_impl(fe_limb_t out[LIMBS],
 }
 
 static void fe_mul_ltt(fe_loose *h, const fe *f, const fe *g) {
-  fe_mul_impl(h->v, f->v, g->v);
-}
-
-static void fe_mul_llt(fe_loose *h, const fe_loose *f, const fe *g) {
   fe_mul_impl(h->v, f->v, g->v);
 }
 
@@ -556,12 +543,6 @@ static void ge_p3_0(ge_p3 *h) {
   fe_0(&h->T);
 }
 
-static void ge_precomp_0(ge_precomp *h) {
-  fe_loose_1(&h->yplusx);
-  fe_loose_1(&h->yminusx);
-  fe_loose_0(&h->xy2d);
-}
-
 // r = p
 static void ge_p3_to_p2(ge_p2 *r, const ge_p3 *p) {
   fe_copy(&r->X, &p->X);
@@ -688,78 +669,152 @@ static void x25519_ge_sub(ge_p1p1 *r, const ge_p3 *p, const ge_cached *q) {
   fe_add(&r->T, &trZ, &trT);
 }
 
-static uint8_t equal(signed char b, signed char c) {
-  uint8_t ub = b;
-  uint8_t uc = c;
-  uint8_t x = ub ^ uc;  // 0: yes; 1..255: no
-  uint32_t y = x;       // 0: yes; 1..255: no
-  y -= 1;               // 4294967295: yes; 0..254: no
-  y >>= 31;             // 1: yes; 0: no
-  return y;
-}
-
 static void cmov(ge_precomp *t, const ge_precomp *u, uint8_t b) {
   fe_cmov(&t->yplusx, &u->yplusx, b);
   fe_cmov(&t->yminusx, &u->yminusx, b);
   fe_cmov(&t->xy2d, &u->xy2d, b);
 }
 
-static void x25519_ge_scalarmult_small_precomp(
-    ge_p3 *h, const uint8_t a[32], const uint8_t precomp_table[15 * 2 * 32]) {
-  // precomp_table is first expanded into matching |ge_precomp|
-  // elements.
-  ge_precomp multiples[15];
+// from crypto/internal.h
+// constant_time_msb_w returns the given value with the MSB copied to all the
+// other bits.
+static inline WORD constant_time_msb_w(WORD a) {
+  return 0u - (a >> (sizeof(a) * 8 - 1));
+}
 
-  unsigned i;
-  for (i = 0; i < 15; i++) {
-    // The precomputed table is assumed to already clear the top bit, so
-    // |fe_frombytes_strict| may be used directly.
-    const uint8_t *bytes = &precomp_table[i*(2 * 32)];
-    fe x, y;
-    fe_frombytes_strict(&x, bytes);
-    fe_frombytes_strict(&y, bytes + 32);
+// constant_time_is_zero returns 0xff..f if a == 0 and 0 otherwise.
+static inline WORD constant_time_is_zero_w(WORD a) {
+  // Here is an SMT-LIB verification of this formula:
+  //
+  // (define-fun is_zero ((a (_ BitVec 32))) (_ BitVec 32)
+  //   (bvand (bvnot a) (bvsub a #x00000001))
+  // )
+  //
+  // (declare-fun a () (_ BitVec 32))
+  //
+  // (assert (not (= (= #x00000001 (bvlshr (is_zero a) #x0000001f)) (= a #x00000000))))
+  // (check-sat)
+  // (get-model)
+  return constant_time_msb_w(~a & (a - 1));
+}
 
-    ge_precomp *out = &multiples[i];
-    fe_add(&out->yplusx, &y, &x);
-    fe_sub(&out->yminusx, &y, &x);
-    fe_mul_ltt(&out->xy2d, &x, &y);
-    fe_mul_llt(&out->xy2d, &out->xy2d, &d2);
-  }
+// constant_time_eq_w returns 0xff..f if a == b and 0 otherwise.
+static inline WORD constant_time_eq_w(WORD a, WORD b) {
+  return constant_time_is_zero_w(a ^ b);
+}
 
-  // See the comment above |k25519SmallPrecomp| about the structure of the
-  // precomputed elements. This loop does 64 additions and 64 doublings to
-  // calculate the result.
-  ge_p3_0(h);
+// value_barrier_w returns |a|, but prevents GCC and Clang from reasoning about
+// the returned value. This is used to mitigate compilers undoing constant-time
+// code, until we can express our requirements directly in the language.
+//
+// Note the compiler is aware that |value_barrier_w| has no side effects and
+// always has the same output for a given input. This allows it to eliminate
+// dead code, move computations across loops, and vectorize.
+static inline WORD value_barrier_w(WORD a) {
+#if defined(__GNUC__) || defined(__clang__)
+  __asm__("" : "+r"(a) : /* no inputs */);
+#endif
+  return a;
+}
 
-  for (i = 63; i < 64; i--) {
-    unsigned j;
-    signed char index = 0;
-
-    for (j = 0; j < 4; j++) {
-      const uint8_t bit = 1 & (a[(8 * j) + (i / 8)] >> (i & 7));
-      index |= (bit << j);
-    }
-
-    ge_precomp e;
-    ge_precomp_0(&e);
-
-    for (j = 1; j < 16; j++) {
-      cmov(&e, &multiples[j-1], equal(index, j));
-    }
-
-    ge_cached cached;
-    ge_p1p1 r;
-    x25519_ge_p3_to_cached(&cached, h);
-    x25519_ge_add(&r, h, &cached);
-    x25519_ge_p1p1_to_p3(h, &r);
-
-    ge_madd(&r, h, &e);
-    x25519_ge_p1p1_to_p3(h, &r);
+// constant_time_conditional_memxor xors |n| bytes from |src| to |dst| if
+// |mask| is 0xff..ff and does nothing if |mask| is 0. The |n|-byte memory
+// ranges at |dst| and |src| must not overlap, as when calling |memcpy|.
+static inline void constant_time_conditional_memxor(void *dst, const void *src,
+                                                    const size_t n,
+                                                    const WORD mask) {
+  assert(!buffers_alias(dst, n, src, n));
+  uint8_t *out = (uint8_t *)dst;
+  const uint8_t *in = (const uint8_t *)src;
+  for (size_t i = 0; i < n; i++) {
+    out[i] ^= value_barrier_w(mask) & in[i];
   }
 }
 
+static void table_select(ge_precomp *t, const int pos, const signed char b) {
+  uint8_t bnegative = constant_time_msb_w(b);
+  uint8_t babs = b - ((bnegative & b) << 1);
+
+  uint8_t t_bytes[3][32] = {
+      {constant_time_is_zero_w(b) & 1}, {constant_time_is_zero_w(b) & 1}, {0}};
+#if defined(__clang__) // materialize for vectorization, 6% speedup
+  __asm__("" : "+m" (t_bytes) : /*no inputs*/);
+#endif
+  static_assert(sizeof(t_bytes) == sizeof(k25519Precomp[pos][0]), "");
+  for (int i = 0; i < 8; i++) {
+    constant_time_conditional_memxor(t_bytes, k25519Precomp[pos][i],
+                                     sizeof(t_bytes),
+                                     constant_time_eq_w(babs, 1 + i));
+  }
+
+  fe yplusx, yminusx, xy2d;
+  fe_frombytes_strict(&yplusx, t_bytes[0]);
+  fe_frombytes_strict(&yminusx, t_bytes[1]);
+  fe_frombytes_strict(&xy2d, t_bytes[2]);
+
+  fe_copy_lt(&t->yplusx, &yplusx);
+  fe_copy_lt(&t->yminusx, &yminusx);
+  fe_copy_lt(&t->xy2d, &xy2d);
+
+  ge_precomp minust;
+  fe_copy_lt(&minust.yplusx, &yminusx);
+  fe_copy_lt(&minust.yminusx, &yplusx);
+  fe_neg(&minust.xy2d, &xy2d);
+  cmov(t, &minust, bnegative>>7);
+}
+
+// h = a * B
+// where a = a[0]+256*a[1]+...+256^31 a[31]
+// B is the Ed25519 base point (x,4/5) with x positive.
+//
+// Preconditions:
+//   a[31] <= 127
 static void x25519_ge_scalarmult_base(ge_p3 *h, const uint8_t a[32]) {
-  x25519_ge_scalarmult_small_precomp(h, a, k25519SmallPrecomp);
+  signed char e[64];
+  signed char carry;
+  ge_p1p1 r;
+  ge_p2 s;
+  ge_precomp t;
+  int i;
+
+  for (i = 0; i < 32; ++i) {
+    e[2 * i + 0] = (a[i] >> 0) & 15;
+    e[2 * i + 1] = (a[i] >> 4) & 15;
+  }
+  // each e[i] is between 0 and 15
+  // e[63] is between 0 and 7
+
+  carry = 0;
+  for (i = 0; i < 63; ++i) {
+    e[i] += carry;
+    carry = e[i] + 8;
+    carry >>= 4;
+    e[i] -= carry << 4;
+  }
+  e[63] += carry;
+  // each e[i] is between -8 and 8
+
+  ge_p3_0(h);
+  for (i = 1; i < 64; i += 2) {
+    table_select(&t, i / 2, e[i]);
+    ge_madd(&r, h, &t);
+    x25519_ge_p1p1_to_p3(h, &r);
+  }
+
+  ge_p3_dbl(&r, h);
+  x25519_ge_p1p1_to_p2(&s, &r);
+  ge_p2_dbl(&r, &s);
+  x25519_ge_p1p1_to_p2(&s, &r);
+  ge_p2_dbl(&r, &s);
+  x25519_ge_p1p1_to_p2(&s, &r);
+  ge_p2_dbl(&r, &s);
+  x25519_ge_p1p1_to_p3(h, &r);
+
+  for (i = 0; i < 64; i += 2) {
+    table_select(&t, i / 2, e[i]);
+    ge_madd(&r, h, &t);
+    x25519_ge_p1p1_to_p3(h, &r);
+  }
 }
 
 static void slide(signed char *r, const uint8_t *a) {
