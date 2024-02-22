@@ -58,7 +58,7 @@ let check_shape tables =
 
 let print_tables tables ~wordsize =
   let fe_len = String.length tables.(0).(0).(0) in
-  printf "@[<2>static WORD generator_table[%d][15][3][LIMBS] = @," (fe_len * 2);
+  printf "@[<2>static WORD generator_table[%d][15][3][LIMBS] =@," (fe_len * 2);
   pp_array
     (pp_array (pp_array (pp_string_words ~wordsize)))
     std_formatter tables;
@@ -77,7 +77,7 @@ let print_toplevel name wordsize (module P : Mirage_crypto_ec.Dh_dsa) =
        @]"
   else
     printf
-      "@[<v>#ifdef ARCH_64BIT@,\
+      "@[<v>#if defined(ARCH_64BIT) && !defined(_MSC_VER)@,\
        #error \"Cannot use 32-bit tables on a 64-bit architecture\"@,\
        #endif@,\
        @]";

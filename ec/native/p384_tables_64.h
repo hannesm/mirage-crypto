@@ -8,7 +8,7 @@
 #ifndef ARCH_64BIT
 #error "Cannot use 64-bit tables on a 32-bit architecture"
 #endif
-static WORD generator_table[96][15][3][LIMBS] = 
+static WORD generator_table[96][15][3][LIMBS] =
   {
     {
       {
