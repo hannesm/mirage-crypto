@@ -35,7 +35,7 @@
  (name test_entropy_collection_async)
  (modules test_entropy_collection_async)
  (package mirage-crypto-rng-async)
- (libraries mirage-crypto-rng-async))
+ (libraries mirage-crypto-rng-async ohex))
 
 (test
  (name test_entropy)
