@@ -30,8 +30,7 @@
 let src = Logs.Src.create "mirage-crypto-rng-mirage" ~doc:"Mirage crypto RNG mirage"
 module Log = (val Logs.src_log src : Logs.LOG)
 
-module Make (T : Mirage_time.S) (M : Mirage_clock.MCLOCK) = struct
-  include Mirage_crypto_rng
+include Mirage_crypto_rng
 
   let rdrand_task delta =
     match Entropy.cpu_rng with
@@ -42,7 +41,7 @@ module Make (T : Mirage_time.S) (M : Mirage_clock.MCLOCK) = struct
       Lwt.async (fun () ->
           let rec one () =
             rdrand ();
-            T.sleep_ns delta >>=
+            Mirage_time.sleep_ns delta >>=
             one
           in
           one ())
@@ -67,10 +66,9 @@ module Make (T : Mirage_time.S) (M : Mirage_clock.MCLOCK) = struct
       let seed =
         List.mapi (fun i f -> f i) (bootstrap_functions ()) |> Cstruct.concat
       in
-      let rng = create ?g ~seed ~time:M.elapsed_ns rng in
+      let rng = create ?g ~seed ~time:Mirage_clock.Mclock.elapsed_ns rng in
       set_default_generator rng;
       rdrand_task sleep;
       Mirage_runtime.at_enter_iter (Entropy.timer_accumulator None);
       Lwt.return_unit
     end
-end
